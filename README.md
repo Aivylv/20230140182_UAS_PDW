@@ -1,4 +1,4 @@
-# Sistem Pengumpulan Tugas (SIMPRAK)
+# Sistem Informasi Manajemen Praktikum (SIMPRAK)
 
 Aplikasi Sistem Informasi Manajemen Praktikum (SIMPRAK) berbasis web ini dirancang untuk membantu manajemen praktikum di institusi pendidikan. Aplikasi ini memiliki dua jenis pengguna: Mahasiswa dan Asisten, dengan berbagai fitur yang mendukung pengelolaan praktikum secara lebih efisien.
 
