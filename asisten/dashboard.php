@@ -1,10 +1,76 @@
 <?php
+// Letakkan semua logika PHP di bagian paling atas.
+if (session_status() === PHP_SESSION_NONE) {
+    session_start();
+}
+
+require_once '../config.php';
+
+// Redirect jika bukan asisten atau belum login
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'asisten') {
+    header("Location: ../login.php");
+    exit;
+}
+
 // 1. Definisi Variabel untuk Template
 $pageTitle = 'Dashboard';
 $activePage = 'dashboard';
 
 // 2. Panggil Header
-require_once 'templates/header.php'; 
+require_once 'templates/header.php';
+
+$asisten_id = $_SESSION['user_id'];
+
+// --- PENGAMBILAN DATA STATISTIK ---
+
+// Menghitung Total Modul yang Diajarkan
+$totalModulesQuery = "SELECT COUNT(m.id) as total 
+                      FROM modul m 
+                      JOIN mata_praktikum mp ON m.mata_praktikum_id = mp.id 
+                      WHERE mp.asisten_id = ?";
+$totalModulesStmt = $conn->prepare($totalModulesQuery);
+$totalModulesStmt->bind_param("i", $asisten_id);
+$totalModulesStmt->execute();
+$totalModules = $totalModulesStmt->get_result()->fetch_assoc()['total'];
+$totalModulesStmt->close();
+
+// Menghitung Total Laporan Masuk
+$totalReportsQuery = "SELECT COUNT(l.id) as total 
+                      FROM laporan l 
+                      JOIN modul m ON l.modul_id = m.id 
+                      JOIN mata_praktikum mp ON m.mata_praktikum_id = mp.id 
+                      WHERE mp.asisten_id = ?";
+$totalReportsStmt = $conn->prepare($totalReportsQuery);
+$totalReportsStmt->bind_param("i", $asisten_id);
+$totalReportsStmt->execute();
+$totalReports = $totalReportsStmt->get_result()->fetch_assoc()['total'];
+$totalReportsStmt->close();
+
+// Menghitung Laporan yang Belum Dinilai (status: dikumpulkan)
+$pendingReportsQuery = "SELECT COUNT(l.id) as total 
+                        FROM laporan l 
+                        JOIN modul m ON l.modul_id = m.id 
+                        JOIN mata_praktikum mp ON m.mata_praktikum_id = mp.id 
+                        WHERE mp.asisten_id = ? AND l.status = 'dikumpulkan'"; // Diperbaiki dari 'pending'
+$pendingReportsStmt = $conn->prepare($pendingReportsQuery);
+$pendingReportsStmt->bind_param("i", $asisten_id);
+$pendingReportsStmt->execute();
+$pendingReports = $pendingReportsStmt->get_result()->fetch_assoc()['total'];
+$pendingReportsStmt->close();
+
+// Mengambil Aktivitas Laporan Terbaru
+$recentActivitiesQuery = "SELECT l.tanggal_upload, l.status, u.nama as mahasiswa_nama, m.judul as modul_judul
+                          FROM laporan l
+                          JOIN users u ON l.mahasiswa_id = u.id
+                          JOIN modul m ON l.modul_id = m.id
+                          JOIN mata_praktikum mp ON m.mata_praktikum_id = mp.id
+                          WHERE mp.asisten_id = ?
+                          ORDER BY l.tanggal_upload DESC
+                          LIMIT 5";
+$recentActivitiesStmt = $conn->prepare($recentActivitiesQuery);
+$recentActivitiesStmt->bind_param("i", $asisten_id);
+$recentActivitiesStmt->execute();
+$recentActivities = $recentActivitiesStmt->get_result();
 ?>
 
 <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -15,7 +81,7 @@ require_once 'templates/header.php';
         </div>
         <div>
             <p class="text-sm text-gray-500">Total Modul Diajarkan</p>
-            <p class="text-2xl font-bold text-gray-800">12</p>
+            <p class="text-2xl font-bold text-gray-800"><?php echo $totalModules; ?></p>
         </div>
     </div>
 
@@ -25,7 +91,7 @@ require_once 'templates/header.php';
         </div>
         <div>
             <p class="text-sm text-gray-500">Total Laporan Masuk</p>
-            <p class="text-2xl font-bold text-gray-800">152</p>
+            <p class="text-2xl font-bold text-gray-800"><?php echo $totalReports; ?></p>
         </div>
     </div>
 
@@ -35,37 +101,40 @@ require_once 'templates/header.php';
         </div>
         <div>
             <p class="text-sm text-gray-500">Laporan Belum Dinilai</p>
-            <p class="text-2xl font-bold text-gray-800">18</p>
+            <p class="text-2xl font-bold text-gray-800"><?php echo $pendingReports; ?></p>
         </div>
     </div>
 </div>
 
 <div class="bg-white p-6 rounded-lg shadow-md mt-8">
     <h3 class="text-xl font-bold text-gray-800 mb-4">Aktivitas Laporan Terbaru</h3>
-    <div class="space-y-4">
-        <div class="flex items-center">
-            <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mr-4">
-                <span class="font-bold text-gray-500">BS</span>
-            </div>
-            <div>
-                <p class="text-gray-800"><strong>Budi Santoso</strong> mengumpulkan laporan untuk <strong>Modul 2</strong></p>
-                <p class="text-sm text-gray-500">10 menit lalu</p>
-            </div>
+    <?php if ($recentActivities->num_rows > 0): ?>
+        <div class="space-y-4">
+            <?php while ($activity = $recentActivities->fetch_assoc()): ?>
+                <div class="flex items-center">
+                    <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mr-4">
+                        <span class="font-bold text-gray-500"><?php echo strtoupper(substr($activity['mahasiswa_nama'], 0, 2)); ?></span>
+                    </div>
+                    <div>
+                        <p class="text-gray-800">
+                            <strong><?php echo htmlspecialchars($activity['mahasiswa_nama']); ?></strong> 
+                            mengumpulkan laporan untuk <strong><?php echo htmlspecialchars($activity['modul_judul']); ?></strong>
+                        </p>
+                        <p class="text-sm text-gray-500"><?php echo date('d M Y, H:i', strtotime($activity['tanggal_upload'])); ?></p>
+                    </div>
+                </div>
+            <?php endwhile; ?>
         </div>
-        <div class="flex items-center">
-            <div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center mr-4">
-                <span class="font-bold text-gray-500">CL</span>
-            </div>
-            <div>
-                <p class="text-gray-800"><strong>Citra Lestari</strong> mengumpulkan laporan untuk <strong>Modul 2</strong></p>
-                <p class="text-sm text-gray-500">45 menit lalu</p>
-            </div>
+    <?php else: ?>
+        <div class="text-center py-8 text-gray-500">
+            <svg class="w-12 h-12 mx-auto mb-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" /></svg>
+            <p>Belum ada aktivitas laporan terbaru.</p>
         </div>
-    </div>
+    <?php endif; ?>
 </div>
-
 
 <?php
 // 3. Panggil Footer
+$conn->close();
 require_once 'templates/footer.php';
 ?>
